@@ -1,0 +1,28 @@
+@import 'tailwindcss';
+
+/*
+ * Tailwind v4 is configured entirely from CSS — no tailwind.config.js needed.
+ * The Vite plugin (`@tailwindcss/vite`) scans source files automatically.
+ */
+
+@theme {
+  --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, Consolas, monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+    /* Prevent iOS Safari from inflating text in the coin/action bars. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-slate-100 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+  }
+
+  /* Monetary readouts are tabular so digits do not jitter as totals change. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
