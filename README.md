@@ -1,15 +1,16 @@
 # Vending Machine
 
-A web-based vending machine built with **React 19 + TypeScript**, styled with **Tailwind CSS v4**, and backed by a strictly separated, unit-tested domain layer. The application loads its initial product catalog and coin float from a mocked external API, then runs entirely on local application state: inserting coins, buying products, returning coins, and administering inventory (CRUD) all flow through a single, pure, testable state machine.
+A web-based vending machine built with **Angular 18 (standalone components, Signals, RxJS) + TypeScript**, styled with **Tailwind CSS v4**, and backed by a strictly separated, unit-tested domain layer. The application loads its initial product catalog and coin float from a mocked external API, then runs entirely on local application state: inserting coins, buying products, returning coins, and administering inventory (CRUD) all flow through a single, pure, testable state machine.
 
 ## Overview
 
 The codebase draws a hard line between **domain logic** and **UI**:
 
-- `src/domain/` — plain TypeScript, zero React or DOM dependencies. Money arithmetic (`money.ts`), the change-making algorithm (`change.ts`), and the vending machine's entire state machine (`machineReducer.ts`) live here as pure functions and a pure `useReducer`-compatible reducer. Every rule (stock limits, atomic purchase rejection, money conservation) is unit-tested in isolation, with no rendering, mocking, or DOM setup required.
-- `src/services/` — the mocked external API (`productsApi.ts` + seed data), simulating network latency and, optionally, failure.
-- `src/state/` — a thin React binding (`MachineContext.tsx`) that wires the reducer into a provider using split state/dispatch contexts, so components that only dispatch never re-render on state changes.
-- `src/components/` — presentation only. Vending (`components/vending/`) and admin (`components/admin/`) views consume the context via `useMachineState`/`useMachineDispatch` and contain no business rules of their own.
+- `src/domain/` — plain TypeScript, zero framework or DOM dependencies. Money arithmetic (`money.ts`), the change-making algorithm (`change.ts`), and the vending machine's entire state machine (`machineReducer.ts`) live here as pure functions and a pure reducer. Every rule (stock limits, atomic purchase rejection, money conservation) is unit-tested in isolation, with no rendering, mocking, or DOM setup required.
+- `src/services/` — the mocked catalog (`seed.ts`).
+- `src/app/core/` — `ProductsApiService`, the mocked external API exposed as cold RxJS streams (`of(...).pipe(delay(600))`), simulating network latency and, optionally, failure. Failure is switched by the `SIMULATE_API_FAILURE` injection token, which `app.config.ts` sets from `?simulateFailure=true`.
+- `src/app/state/` — `MachineStore`, an `@Injectable()` Signals store. State lives in a private `WritableSignal`, is exposed as a deeply readonly `Signal`, and every change goes through `dispatch(action)` → `machineReducer`. It also runs the one side effect (loading from the API, with retry) and exposes `computed()` selectors.
+- `src/app/components/` — standalone, `OnPush` components. The container views (`VendingViewComponent`, `AdminViewComponent`) inject `MachineStore` and read its signals in their templates; every child component is purely presentational, taking signal `input()`s and emitting `output()`s. There are no NgModules.
 
 This separation means the hardest part of the assignment — the money and change-making rules — can be reasoned about and verified with plain Vitest unit tests, independent of anything rendered on screen.
 
@@ -21,7 +22,7 @@ This separation means the hardest part of the assignment — the money and chang
 | Distinct price per product type | Enforced by `validateDraft` on every create/update; rejects a price already used by another product |
 | A chosen currency, with accepted denominations documented and enforced | USD; only $0.05 / $0.10 / $0.25 / $1.00 accepted — see [Currency & Denominations](#currency--denominations) |
 | Machine must return change | `makeChange` (greedy + memoized DFS fallback) computes exact change from the combined bank + inserted coins, or the purchase is atomically rejected |
-| Get initial product list from an external resource (mocked API) | `src/services/productsApi.ts` — an async, artificially latent, occasionally-failing stand-in for a real HTTP endpoint, seeded from `src/services/seed.ts` |
+| Get initial product list from an external resource (mocked API) | `src/app/core/products-api.service.ts` — RxJS streams with simulated latency and an optional failure mode, a stand-in for a real HTTP endpoint, seeded from `src/services/seed.ts` |
 | CRUD for products in application state only | `CREATE_PRODUCT` / `UPDATE_PRODUCT` / `DELETE_PRODUCT` / `RESTOCK_PRODUCT` actions mutate only the in-memory reducer state; the mocked API is read-only and is never written back to, so a page reload restores the original seed |
 | Vending: insert coins, buy, reset (return coins without purchase) | `INSERT_COIN`, `BUY`, and `RESET` actions in the vending view |
 | Responsive web design | Tailwind v4 utility classes throughout, mobile-first (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`, a sticky bottom action bar on mobile, table-to-stacked-cards collapse in the admin view) |
@@ -52,7 +53,7 @@ Every monetary value in the application — prices, inserted coins, bank float, 
 
 ### State Management
 
-The entire vending machine — inventory, coin float, escrowed coins, output tray, and messages — is modeled as a single, pure `machineReducer` function (`(state, action) => state`), used with React's `useReducer`. Because it is pure and framework-agnostic:
+The entire vending machine — inventory, coin float, escrowed coins, output tray, and messages — is modeled as a single, pure `machineReducer` function (`(state, action) => state`), driven by an Angular Signals store (`this.state.update(s => machineReducer(s, action))`). Because it is pure and framework-agnostic:
 
 - The **money conservation invariant** (bank + inserted + tray totals never gain or lose value except when a coin is physically inserted or collected) can be asserted directly in unit tests, across arbitrary sequences of actions, with no rendering or mocking involved.
 - A rejected purchase (insufficient funds, sold out, or no exact change available) is guaranteed atomic: the reducer either returns a wholly new state with stock/bank/escrow updated together, or returns an unmodified state plus an error message — there is no partially-applied transaction.
@@ -65,7 +66,7 @@ The entire vending machine — inventory, coin float, escrowed coins, output tra
 npm install
 
 # Start the dev server (http://localhost:5173)
-npm run dev
+npm start
 
 # Build for production
 npm run build
@@ -74,6 +75,12 @@ npm run build
 npm test
 ```
 
-Other useful scripts: `npm run test:watch` (Vitest in watch mode), `npm run typecheck` (`tsc -b` with no emit), `npm run lint` (Oxlint), `npm run preview` (serve the production build locally).
+Open the app with `?simulateFailure=true` (e.g. `http://localhost:5173/?simulateFailure=true`) to exercise the error + retry UI.
+
+Other useful scripts: `npm run test:watch` (Vitest in watch mode), `npm run typecheck` (Angular compiler with strict templates, plus the spec project), `npm run lint` (Oxlint), `npm run preview` (serve the production build locally).
+
+### Build tooling note
+
+The app is compiled by Angular 18's compiler (AOT) running inside Vite through `@analogjs/vite-plugin-angular`, rather than the Angular CLI builder. The immutable domain files import with `.ts` extensions, which needs `allowImportingTsExtensions`; TypeScript 5.5 (the newest version Angular 18 supports) only allows that with `noEmit`, which the CLI builder cannot run with. `.npmrc` sets `legacy-peer-deps` because `@angular/build@18` declares an optional peer on Tailwind 2/3.
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
